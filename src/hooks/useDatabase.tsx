@@ -111,39 +111,66 @@ export const useDatabase = () => {
   const [currentEstablishment, setCurrentEstablishment] = useState<
     string | null
   >(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   // Carrega dados do localStorage na inicialização
   useEffect(() => {
-    const savedDeliveries = localStorage.getItem(STORAGE_KEYS.deliveries);
-    const savedDeliverers = localStorage.getItem(STORAGE_KEYS.deliverers);
-    const savedEstablishments = localStorage.getItem(
-      STORAGE_KEYS.establishments
-    );
-    const savedCurrentEstablishment = localStorage.getItem(
-      STORAGE_KEYS.currentEstablishment
-    );
+    const loadData = () => {
+      try {
+        const savedDeliveries = localStorage.getItem(STORAGE_KEYS.deliveries);
+        const savedDeliverers = localStorage.getItem(STORAGE_KEYS.deliverers);
+        const savedEstablishments = localStorage.getItem(
+          STORAGE_KEYS.establishments
+        );
+        const savedCurrentEstablishment = localStorage.getItem(
+          STORAGE_KEYS.currentEstablishment
+        );
 
-    if (savedDeliveries) {
-      setDeliveries(JSON.parse(savedDeliveries));
-    } else {
-      setDeliveries(initialDeliveries);
-    }
+        if (savedDeliveries) {
+          setDeliveries(JSON.parse(savedDeliveries));
+        } else {
+          setDeliveries(initialDeliveries);
+          localStorage.setItem(
+            STORAGE_KEYS.deliveries,
+            JSON.stringify(initialDeliveries)
+          );
+        }
 
-    if (savedDeliverers) {
-      setDeliverers(JSON.parse(savedDeliverers));
-    } else {
-      setDeliverers(initialDeliverers);
-    }
+        if (savedDeliverers) {
+          setDeliverers(JSON.parse(savedDeliverers));
+        } else {
+          setDeliverers(initialDeliverers);
+          localStorage.setItem(
+            STORAGE_KEYS.deliverers,
+            JSON.stringify(initialDeliverers)
+          );
+        }
 
-    if (savedEstablishments) {
-      setEstablishments(JSON.parse(savedEstablishments));
-    } else {
-      setEstablishments(initialEstablishments);
-    }
+        if (savedEstablishments) {
+          setEstablishments(JSON.parse(savedEstablishments));
+        } else {
+          setEstablishments(initialEstablishments);
+          localStorage.setItem(
+            STORAGE_KEYS.establishments,
+            JSON.stringify(initialEstablishments)
+          );
+        }
 
-    if (savedCurrentEstablishment) {
-      setCurrentEstablishment(savedCurrentEstablishment);
-    }
+        if (savedCurrentEstablishment) {
+          setCurrentEstablishment(savedCurrentEstablishment);
+        }
+      } catch (error) {
+        console.error("Erro ao carregar dados do localStorage:", error);
+        // Fallback para dados iniciais
+        setDeliveries(initialDeliveries);
+        setDeliverers(initialDeliverers);
+        setEstablishments(initialEstablishments);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadData();
   }, []);
 
   // Salva no localStorage sempre que os dados mudam
@@ -175,65 +202,166 @@ export const useDatabase = () => {
   const addDelivery = (
     delivery: Omit<Delivery, "id" | "createdAt" | "establishmentId">
   ) => {
-    const newDelivery: Delivery = {
-      ...delivery,
-      id: Math.max(...deliveries.map((d) => d.id), 0) + 1,
-      createdAt: new Date().toISOString(),
-      establishmentId: currentEstablishment || "est_1",
-    };
-    setDeliveries((prev) => [...prev, newDelivery]);
-    return newDelivery;
+    try {
+      // Validação básica
+      if (!delivery.address?.trim()) {
+        throw new Error("Endereço é obrigatório");
+      }
+      if (!delivery.value || delivery.value <= 0) {
+        throw new Error("Valor deve ser maior que zero");
+      }
+
+      const newDelivery: Delivery = {
+        ...delivery,
+        id: Math.max(...deliveries.map((d) => d.id), 0) + 1,
+        createdAt: new Date().toISOString(),
+        establishmentId: currentEstablishment || "est_1",
+        customerName:
+          delivery.customerName?.trim() || "Cliente não identificado",
+        address: delivery.address.trim(),
+        phone: delivery.phone?.trim() || "",
+        status: "pendente",
+      };
+
+      setDeliveries((prev) => [...prev, newDelivery]);
+      return newDelivery;
+    } catch (error) {
+      console.error("❌ Erro ao adicionar entrega:", error);
+      throw error;
+    }
   };
 
   const updateDelivery = (id: number, updates: Partial<Delivery>) => {
-    setDeliveries((prev) =>
-      prev.map((delivery) =>
-        delivery.id === id ? { ...delivery, ...updates } : delivery
-      )
-    );
+    try {
+      setDeliveries((prev) =>
+        prev.map((delivery) => {
+          if (delivery.id === id) {
+            const updatedDelivery = { ...delivery, ...updates };
+
+            // Se status mudou para entregue, adiciona completedAt
+            if (
+              updates.status === "entregue" &&
+              delivery.status !== "entregue"
+            ) {
+              updatedDelivery.completedAt = new Date().toISOString();
+            }
+
+            return updatedDelivery;
+          }
+          return delivery;
+        })
+      );
+    } catch (error) {
+      console.error("Erro ao atualizar entrega:", error);
+      throw error;
+    }
   };
 
   const deleteDelivery = (id: number) => {
-    setDeliveries((prev) => prev.filter((delivery) => delivery.id !== id));
+    try {
+      setDeliveries((prev) => prev.filter((delivery) => delivery.id !== id));
+    } catch (error) {
+      console.error("Erro ao deletar entrega:", error);
+      throw error;
+    }
   };
 
   // Funções para gerenciar deliverers
   const addDeliverer = (
     deliverer: Omit<Deliverer, "id" | "createdAt" | "establishmentId">
   ) => {
-    const newDeliverer: Deliverer = {
-      ...deliverer,
-      id: Date.now().toString(),
-      createdAt: new Date().toISOString(),
-      establishmentId: currentEstablishment || "est_1",
-    };
-    setDeliverers((prev) => [...prev, newDeliverer]);
-    return newDeliverer;
+    try {
+      // Validação básica
+      if (!deliverer.name?.trim()) {
+        throw new Error("Nome do entregador é obrigatório");
+      }
+      if (!deliverer.vehicle) {
+        throw new Error("Tipo de veículo é obrigatório");
+      }
+      if (!deliverer.zone?.trim()) {
+        throw new Error("Zona de entrega é obrigatória");
+      }
+
+      // Verificar se já existe entregador com mesmo nome no estabelecimento
+      const existingDeliverer = deliverers.find(
+        (d) =>
+          d.name.toLowerCase() === deliverer.name.toLowerCase() &&
+          d.establishmentId === currentEstablishment
+      );
+
+      if (existingDeliverer) {
+        throw new Error("Já existe um entregador com este nome");
+      }
+
+      const newDeliverer: Deliverer = {
+        ...deliverer,
+        id: Date.now().toString(),
+        createdAt: new Date().toISOString(),
+        establishmentId: currentEstablishment || "est_1",
+        name: deliverer.name.trim(),
+        zone: deliverer.zone.trim(),
+        phone: deliverer.phone?.trim() || "",
+        email: deliverer.email?.trim() || "",
+        plate: deliverer.plate?.trim() || "",
+        status: deliverer.status || "disponivel",
+      };
+
+      setDeliverers((prev) => [...prev, newDeliverer]);
+      return newDeliverer;
+    } catch (error) {
+      console.error("❌ Erro ao adicionar entregador:", error);
+      throw error;
+    }
   };
 
   const updateDeliverer = (id: string, updates: Partial<Deliverer>) => {
-    setDeliverers((prev) =>
-      prev.map((deliverer) =>
-        deliverer.id === id ? { ...deliverer, ...updates } : deliverer
-      )
-    );
+    try {
+      setDeliverers((prev) =>
+        prev.map((deliverer) => {
+          if (deliverer.id === id) {
+            return { ...deliverer, ...updates };
+          }
+          return deliverer;
+        })
+      );
+
+      // Atualizar nome do entregador nas entregas atribuídas
+      if (updates.name) {
+        setDeliveries((prev) =>
+          prev.map((delivery) =>
+            delivery.assignedTo === id
+              ? { ...delivery, assignedToName: updates.name }
+              : delivery
+          )
+        );
+      }
+    } catch (error) {
+      console.error("Erro ao atualizar entregador:", error);
+      throw error;
+    }
   };
 
   const deleteDeliverer = (id: string) => {
-    setDeliverers((prev) => prev.filter((deliverer) => deliverer.id !== id));
-    // Remove assignments
-    setDeliveries((prev) =>
-      prev.map((delivery) =>
-        delivery.assignedTo === id
-          ? {
-              ...delivery,
-              assignedTo: null,
-              assignedToName: null,
-              status: "pendente",
-            }
-          : delivery
-      )
-    );
+    try {
+      setDeliverers((prev) => prev.filter((deliverer) => deliverer.id !== id));
+
+      // Remove assignments e volta status para pendente
+      setDeliveries((prev) =>
+        prev.map((delivery) =>
+          delivery.assignedTo === id
+            ? {
+                ...delivery,
+                assignedTo: null,
+                assignedToName: null,
+                status: "pendente",
+              }
+            : delivery
+        )
+      );
+    } catch (error) {
+      console.error("Erro ao deletar entregador:", error);
+      throw error;
+    }
   };
 
   // Função para criar estabelecimento
@@ -280,6 +408,7 @@ export const useDatabase = () => {
     deliverers: getFilteredDeliverers(),
     establishments,
     currentEstablishment,
+    isLoading,
 
     // Funções CRUD
     addDelivery,

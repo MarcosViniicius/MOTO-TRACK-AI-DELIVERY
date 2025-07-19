@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth, AuthProvider } from "@/contexts/AuthContext";
 import { useDatabase, Deliverer, Delivery } from "@/hooks/useDatabase";
 import {
@@ -33,6 +33,8 @@ import {
   DollarSign,
   FileText,
   Eye,
+  Zap,
+  Route,
 } from "lucide-react";
 import { DeliveryModal } from "@/components/DeliveryModal";
 import { DelivererModal } from "@/components/DelivererModal";
@@ -42,6 +44,10 @@ import { DelivererManagement } from "@/components/DelivererManagement";
 import { NotificationDropdown } from "@/components/NotificationDropdown";
 import { AccountRegistration } from "@/components/AccountRegistration";
 import { POSExport } from "@/components/POSExport";
+import { AdvancedFilters, FilterState } from "@/components/ui/advanced-filters";
+import { SystemSettings } from "@/components/ui/system-settings";
+import { ReportsAnalytics } from "@/components/ui/reports-analytics";
+import { BackupRestore, BackupData } from "@/components/ui/backup-restore";
 import {
   Dialog,
   DialogContent,
@@ -356,7 +362,15 @@ const MainApp = () => {
     deleteDeliverer,
     createEstablishment,
     authenticateEstablishment,
+    setCurrentEstablishment,
   } = useDatabase();
+
+  // Sincronizar o estabelecimento autenticado com o useDatabase
+  useEffect(() => {
+    if (authenticatedEstablishment?.id) {
+      setCurrentEstablishment(authenticatedEstablishment.id);
+    }
+  }, [authenticatedEstablishment?.id, setCurrentEstablishment]);
   // Estados para controle de modais
   const [isInitialLoginOpen, setIsInitialLoginOpen] = useState(false);
   const [isProfileSwitcherOpen, setIsProfileSwitcherOpen] = useState(false);
@@ -382,12 +396,37 @@ const MainApp = () => {
   const [paymentFilter, setPaymentFilter] = useState("todos");
   const [delivererFilter, setDelivererFilter] = useState("todos");
 
+  // Estados para novos componentes
+  const [advancedFilters, setAdvancedFilters] = useState<FilterState | null>(
+    null
+  );
+  const [systemSettings, setSystemSettings] = useState<SystemSettings | null>(
+    null
+  );
+
   const [feedbackMessage, setFeedbackMessage] = useState<{
     type: "success" | "error" | "warning" | "info";
     message: string;
   } | null>(null);
   const [showNotifications, setShowNotifications] = useState(false);
   const [activeTab, setActiveTab] = useState("entregas");
+
+  // Carregar configurações salvas quando o estabelecimento for autenticado
+  useEffect(() => {
+    if (authenticatedEstablishment?.id) {
+      const settingsKey = `mototrack_settings_${authenticatedEstablishment.id}`;
+      const savedSettings = localStorage.getItem(settingsKey);
+
+      if (savedSettings) {
+        try {
+          const parsedSettings = JSON.parse(savedSettings);
+          setSystemSettings(parsedSettings);
+        } catch (error) {
+          console.error("Erro ao carregar configurações salvas:", error);
+        }
+      }
+    }
+  }, [authenticatedEstablishment?.id]);
 
   // Função para mostrar feedback
   const showFeedback = (
@@ -482,6 +521,25 @@ const MainApp = () => {
     deleteDelivery(id);
     showFeedback("success", "Entrega excluída com sucesso");
   };
+
+  // Função para mudança rápida de status
+  const handleQuickStatusChange = (delivery: Delivery) => {
+    const id = delivery.id;
+
+    if (delivery.status === "pendente") {
+      // Se está pendente, muda para em_andamento (em rota)
+      updateDelivery(id, { status: "em_andamento" });
+      showFeedback("success", "Entrega iniciada! Status: Em Rota");
+    } else if (delivery.status === "em_andamento") {
+      // Se está em andamento, muda para entregue
+      updateDelivery(id, {
+        status: "entregue",
+        completedAt: new Date().toISOString(),
+      });
+      showFeedback("success", "Entrega concluída com sucesso!");
+    }
+  };
+
   const handleOpenDeliveryStatus = (delivery: Delivery) => {
     setSelectedDelivery(delivery);
     setIsDeliveryStatusModalOpen(true);
@@ -587,6 +645,310 @@ const MainApp = () => {
       return true;
     }
   );
+
+  // Funções para novos componentes
+  const handleAdvancedFiltersChange = (filters: FilterState) => {
+    setAdvancedFilters(filters);
+    // Aplicar filtros avançados aqui
+  };
+
+  // Função para aplicar filtros avançados
+  const applyAdvancedFilters = (delivery: Delivery): boolean => {
+    if (!advancedFilters) return true;
+
+    // Filtro de data
+    if (advancedFilters.dateRange.start) {
+      const deliveryDate = new Date(delivery.createdAt || Date.now());
+      const startDate = new Date(advancedFilters.dateRange.start);
+      if (deliveryDate < startDate) return false;
+    }
+    if (advancedFilters.dateRange.end) {
+      const deliveryDate = new Date(delivery.createdAt || Date.now());
+      const endDate = new Date(advancedFilters.dateRange.end);
+      if (deliveryDate > endDate) return false;
+    }
+
+    // Filtro de valor
+    if (advancedFilters.valueRange.min) {
+      const minValue = parseFloat(advancedFilters.valueRange.min);
+      if (delivery.value < minValue) return false;
+    }
+    if (advancedFilters.valueRange.max) {
+      const maxValue = parseFloat(advancedFilters.valueRange.max);
+      if (delivery.value > maxValue) return false;
+    }
+
+    // Filtro de status
+    if (
+      advancedFilters.status !== "all" &&
+      delivery.status !== advancedFilters.status
+    ) {
+      return false;
+    }
+
+    // Filtro de prioridade
+    if (
+      advancedFilters.priority !== "all" &&
+      delivery.priority !== advancedFilters.priority
+    ) {
+      return false;
+    }
+
+    // Filtro de método de pagamento
+    if (
+      advancedFilters.paymentMethod !== "all" &&
+      delivery.paymentMethod !== advancedFilters.paymentMethod
+    ) {
+      return false;
+    }
+
+    // Filtro de entregador
+    if (
+      advancedFilters.deliverer !== "all" &&
+      delivery.assignedTo !== advancedFilters.deliverer
+    ) {
+      return false;
+    }
+
+    // Filtro de zona
+    if (
+      advancedFilters.zone &&
+      !delivery.address
+        .toLowerCase()
+        .includes(advancedFilters.zone.toLowerCase())
+    ) {
+      return false;
+    }
+
+    // Filtro de nome do cliente
+    if (
+      advancedFilters.customerName &&
+      !delivery.customerName
+        .toLowerCase()
+        .includes(advancedFilters.customerName.toLowerCase())
+    ) {
+      return false;
+    }
+
+    // Filtro de endereço
+    if (
+      advancedFilters.address &&
+      !delivery.address
+        .toLowerCase()
+        .includes(advancedFilters.address.toLowerCase())
+    ) {
+      return false;
+    }
+
+    // Filtros booleanos
+    if (advancedFilters.onlyWithObservations && !delivery.observations) {
+      return false;
+    }
+
+    if (advancedFilters.onlyUrgent && delivery.priority !== "alta") {
+      return false;
+    }
+
+    if (advancedFilters.onlyAssigned && !delivery.assignedTo) {
+      return false;
+    }
+
+    if (advancedFilters.onlyUnassigned && delivery.assignedTo) {
+      return false;
+    }
+
+    return true;
+  };
+
+  const handleSystemSettingsChange = (settings: SystemSettings) => {
+    setSystemSettings(settings);
+
+    // Salvar configurações no localStorage
+    const settingsKey = `mototrack_settings_${authenticatedEstablishment?.id}`;
+    localStorage.setItem(settingsKey, JSON.stringify(settings));
+
+    showFeedback("success", "Configurações do sistema atualizadas e salvas!");
+  };
+
+  const handleBackupData = async (): Promise<BackupData> => {
+    try {
+      const backupData = {
+        deliveries: currentEstablishmentDeliveries,
+        deliverers: currentEstablishmentDeliverers,
+        establishments: establishments.filter(
+          (e) => e.id === authenticatedEstablishment?.id
+        ),
+        settings: systemSettings || {},
+        timestamp: new Date().toISOString(),
+        version: "1.0.0",
+      };
+
+      // Salvar backup no localStorage
+      const backupKey = `mototrack_backup_${Date.now()}`;
+      localStorage.setItem(backupKey, JSON.stringify(backupData));
+
+      showFeedback("success", "Backup criado e salvo com sucesso!");
+      return backupData;
+    } catch (error) {
+      showFeedback("error", "Erro ao criar backup");
+      throw new Error("Erro ao criar backup");
+    }
+  };
+
+  const handleRestoreData = async (data: BackupData) => {
+    try {
+      // Validação básica dos dados
+      if (!data.deliveries || !data.deliverers || !data.establishments) {
+        throw new Error("Dados de backup inválidos ou incompletos");
+      }
+
+      // Verificar se os dados pertencem ao estabelecimento atual
+      const currentEstId = authenticatedEstablishment?.id;
+      if (!currentEstId) {
+        throw new Error("Estabelecimento não encontrado");
+      }
+
+      // Filtrar apenas dados do estabelecimento atual
+      const establishmentDeliveries = data.deliveries.filter(
+        (d) => d.establishmentId === currentEstId
+      );
+      const establishmentDeliverers = data.deliverers.filter(
+        (d) => d.establishmentId === currentEstId
+      );
+
+      // Confirmar com o usuário antes de restaurar
+      const confirm = window.confirm(
+        `🔄 RESTAURAÇÃO DE BACKUP\n\n` +
+          `Esta ação irá substituir todos os dados atuais pelos dados do backup:\n\n` +
+          `📦 Entregas: ${establishmentDeliveries.length} (atual: ${currentEstablishmentDeliveries.length})\n` +
+          `👥 Entregadores: ${establishmentDeliverers.length} (atual: ${currentEstablishmentDeliverers.length})\n\n` +
+          `⚠️ ATENÇÃO: Os dados atuais serão SUBSTITUÍDOS!\n\n` +
+          `Deseja continuar com a restauração?`
+      );
+
+      if (!confirm) {
+        showFeedback("info", "Restauração cancelada pelo usuário");
+        return;
+      }
+
+      // Criar backup de segurança antes da restauração
+      showFeedback("info", "Criando backup de segurança antes da restauração...");
+      const safetyBackup = await handleBackupData();
+      const safetyBackupKey = `mototrack_safety_backup_${Date.now()}`;
+      localStorage.setItem(safetyBackupKey, JSON.stringify(safetyBackup));
+
+      // Limpar dados atuais do estabelecimento
+      const allDeliveries = deliveries.filter(d => d.establishmentId !== currentEstId);
+      const allDeliverers = deliverers.filter(d => d.establishmentId !== currentEstId);
+
+      // Restaurar dados do backup
+      const restoredDeliveries = [...allDeliveries, ...establishmentDeliveries];
+      const restoredDeliverers = [...allDeliverers, ...establishmentDeliverers];
+
+      // Simular processo de restauração
+      showFeedback("info", "Restaurando dados...");
+      
+      // Em um sistema real, aqui você chamaria as funções do useDatabase
+      // Por enquanto, vamos simular com localStorage direto
+      localStorage.setItem('deliveries', JSON.stringify(restoredDeliveries));
+      localStorage.setItem('deliverers', JSON.stringify(restoredDeliverers));
+
+      // Restaurar configurações se disponíveis
+      if (data.settings) {
+        localStorage.setItem('systemSettings', JSON.stringify(data.settings));
+      }
+
+      showFeedback(
+        "success", 
+        `✅ Restauração concluída com sucesso!\n\n` +
+        `📦 ${establishmentDeliveries.length} entregas restauradas\n` +
+        `👥 ${establishmentDeliverers.length} entregadores restaurados\n\n` +
+        `💾 Backup de segurança salvo em: ${safetyBackupKey}`
+      );
+
+      // Recarregar a página para refletir as mudanças
+      setTimeout(() => {
+        window.location.reload();
+      }, 2000);
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Erro desconhecido";
+      showFeedback("error", `❌ Erro ao restaurar dados: ${errorMessage}`);
+      throw new Error(`Erro ao restaurar dados: ${errorMessage}`);
+    }
+  };
+
+  const handleClearAllData = async () => {
+    try {
+      const currentEstId = authenticatedEstablishment?.id;
+      if (!currentEstId) {
+        showFeedback("error", "Estabelecimento não encontrado");
+        return;
+      }
+
+      // Confirmar com o usuário
+      const confirm = window.confirm(
+        `⚠️ ATENÇÃO: Esta ação irá remover PERMANENTEMENTE todos os dados do seu estabelecimento:\n\n` +
+          `• ${currentEstablishmentDeliveries.length} entregas\n` +
+          `• ${currentEstablishmentDeliverers.length} entregadores\n` +
+          `• Todas as configurações\n\n` +
+          `Esta ação NÃO PODE SER DESFEITA!\n\n` +
+          `Tem certeza que deseja continuar?`
+      );
+
+      if (!confirm) {
+        showFeedback("info", "Operação cancelada pelo usuário");
+        return;
+      }
+
+      // Segunda confirmação para operação crítica
+      const doubleConfirm = window.confirm(
+        `ÚLTIMA CONFIRMAÇÃO: Digite "CONFIRMAR" abaixo para prosseguir com a exclusão.\n\n` +
+          `Esta é sua última chance de cancelar a operação.`
+      );
+
+      if (!doubleConfirm) {
+        showFeedback("info", "Operação cancelada pelo usuário");
+        return;
+      }
+
+      // Criar backup automático antes de limpar
+      await handleBackupData();
+
+      let deletedDeliveries = 0;
+      let deletedDeliverers = 0;
+
+      // Remover entregas do estabelecimento
+      const establishmentDeliveries = deliveries.filter(
+        (d) => d.establishmentId === currentEstId
+      );
+      for (const delivery of establishmentDeliveries) {
+        deleteDelivery(delivery.id);
+        deletedDeliveries++;
+      }
+
+      // Remover entregadores do estabelecimento
+      const establishmentDeliverers = deliverers.filter(
+        (d) => d.establishmentId === currentEstId
+      );
+      for (const deliverer of establishmentDeliverers) {
+        deleteDeliverer(deliverer.id);
+        deletedDeliverers++;
+      }
+
+      // Limpar configurações do sistema
+      setSystemSettings(null);
+      setAdvancedFilters(null);
+
+      showFeedback(
+        "success",
+        `Dados removidos com sucesso! ${deletedDeliveries} entregas e ${deletedDeliverers} entregadores foram excluídos. Um backup foi criado automaticamente.`
+      );
+    } catch (error) {
+      showFeedback("error", `Erro ao limpar dados: ${error.message}`);
+      throw new Error("Erro ao limpar dados");
+    }
+  };
 
   // Se não há estabelecimento autenticado, mostra tela de login
   if (!isEstablishmentAuthenticated) {
@@ -810,10 +1172,11 @@ const MainApp = () => {
           </CardHeader>
           <CardContent>
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList className="grid w-full grid-cols-3">
+              <TabsList className="grid w-full grid-cols-4">
                 <TabsTrigger value="entregas">Entregas</TabsTrigger>
                 <TabsTrigger value="entregadores">Entregadores</TabsTrigger>
                 <TabsTrigger value="relatorios">Relatórios</TabsTrigger>
+                <TabsTrigger value="sistema">Sistema</TabsTrigger>
               </TabsList>{" "}
               <TabsContent value="entregas" className="space-y-4">
                 {" "}
@@ -865,6 +1228,11 @@ const MainApp = () => {
                   ) : (
                     activeDeliveries
                       .filter((delivery) => {
+                        // Aplicar filtros avançados primeiro
+                        if (!applyAdvancedFilters(delivery)) {
+                          return false;
+                        }
+
                         // Aplicar filtro de busca se houver termo de pesquisa
                         if (searchTerm) {
                           return (
@@ -975,6 +1343,35 @@ const MainApp = () => {
                                   </Button>
                                 )}
 
+                                {/* Botão de Status Rápido */}
+                                {(delivery.status === "pendente" ||
+                                  delivery.status === "em_andamento") && (
+                                  <Button
+                                    variant={
+                                      delivery.status === "pendente"
+                                        ? "default"
+                                        : "secondary"
+                                    }
+                                    size="sm"
+                                    onClick={() =>
+                                      handleQuickStatusChange(delivery)
+                                    }
+                                    className="shrink-0 gap-1"
+                                  >
+                                    {delivery.status === "pendente" ? (
+                                      <>
+                                        <Route className="h-4 w-4" />
+                                        Iniciar
+                                      </>
+                                    ) : (
+                                      <>
+                                        <CheckCircle className="h-4 w-4" />
+                                        Concluir
+                                      </>
+                                    )}
+                                  </Button>
+                                )}
+
                                 {/* Menu de Ações */}
                                 <DropdownMenu>
                                   <DropdownMenuTrigger asChild>
@@ -994,7 +1391,7 @@ const MainApp = () => {
                                       }
                                     >
                                       <Package className="h-4 w-4 mr-2" />
-                                      Ver detalhes
+                                      Mudar Status
                                     </DropdownMenuItem>
                                     {user.type === "vendedor" && (
                                       <>
@@ -1400,6 +1797,35 @@ const MainApp = () => {
                               </div>
                             </div>
                             <div className="flex gap-2 mt-3 sm:mt-0">
+                              {/* Botão de Status Rápido */}
+                              {(delivery.status === "pendente" ||
+                                delivery.status === "em_andamento") && (
+                                <Button
+                                  variant={
+                                    delivery.status === "pendente"
+                                      ? "default"
+                                      : "secondary"
+                                  }
+                                  size="sm"
+                                  onClick={() =>
+                                    handleQuickStatusChange(delivery)
+                                  }
+                                  className="gap-1"
+                                >
+                                  {delivery.status === "pendente" ? (
+                                    <>
+                                      <Route className="h-4 w-4" />
+                                      Iniciar
+                                    </>
+                                  ) : (
+                                    <>
+                                      <CheckCircle className="h-4 w-4" />
+                                      Concluir
+                                    </>
+                                  )}
+                                </Button>
+                              )}
+
                               <Button
                                 onClick={() =>
                                   handleOpenDeliveryStatus(delivery)
@@ -1427,6 +1853,150 @@ const MainApp = () => {
                     )}
                   </CardContent>
                 </Card>
+              </TabsContent>
+              {/* Nova Aba: Sistema */}
+              <TabsContent value="sistema" className="space-y-6">
+                <div className="grid gap-6">
+                  {/* Header da aba Sistema */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-lg font-semibold">
+                        Configurações do Sistema
+                      </h3>
+                      <p className="text-sm text-muted-foreground">
+                        Gerencie configurações avançadas, relatórios e backup de
+                        dados
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Ferramentas Avançadas */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Package className="h-5 w-5" />
+                        Ferramentas Avançadas
+                      </CardTitle>
+                      <CardDescription>
+                        Acesse funcionalidades avançadas do sistema
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="flex flex-wrap gap-3">
+                        <AdvancedFilters
+                          onFiltersChange={handleAdvancedFiltersChange}
+                          deliverers={currentEstablishmentDeliverers}
+                        />
+                        <SystemSettings
+                          onSettingsChange={handleSystemSettingsChange}
+                          currentSettings={systemSettings}
+                        />
+                        <BackupRestore
+                          onBackup={handleBackupData}
+                          onRestore={handleRestoreData}
+                          onClearData={handleClearAllData}
+                          currentData={{
+                            deliveries: currentEstablishmentDeliveries.length,
+                            deliverers: currentEstablishmentDeliverers.length,
+                            establishments: 1,
+                          }}
+                        />
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Relatórios e Analytics Avançados */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <BarChart3 className="h-5 w-5" />
+                        Analytics Avançados
+                      </CardTitle>
+                      <CardDescription>
+                        Análise detalhada de performance e estatísticas
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <ReportsAnalytics
+                        deliveries={currentEstablishmentDeliveries}
+                        deliverers={currentEstablishmentDeliverers}
+                      />
+                    </CardContent>
+                  </Card>
+
+                  {/* Informações do Sistema */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Building className="h-5 w-5" />
+                        Informações do Sistema
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <div className="p-4 bg-blue-50 rounded-lg">
+                          <div className="flex items-center gap-2 mb-2">
+                            <Package className="h-4 w-4 text-blue-600" />
+                            <span className="font-medium text-blue-900">
+                              Versão
+                            </span>
+                          </div>
+                          <span className="text-2xl font-bold text-blue-600">
+                            1.0.0
+                          </span>
+                          <p className="text-xs text-blue-700 mt-1">
+                            MotoTrack AI
+                          </p>
+                        </div>
+
+                        <div className="p-4 bg-green-50 rounded-lg">
+                          <div className="flex items-center gap-2 mb-2">
+                            <CheckCircle className="h-4 w-4 text-green-600" />
+                            <span className="font-medium text-green-900">
+                              Status
+                            </span>
+                          </div>
+                          <span className="text-2xl font-bold text-green-600">
+                            Online
+                          </span>
+                          <p className="text-xs text-green-700 mt-1">
+                            Sistema operacional
+                          </p>
+                        </div>
+
+                        <div className="p-4 bg-purple-50 rounded-lg">
+                          <div className="flex items-center gap-2 mb-2">
+                            <Users className="h-4 w-4 text-purple-600" />
+                            <span className="font-medium text-purple-900">
+                              Usuários
+                            </span>
+                          </div>
+                          <span className="text-2xl font-bold text-purple-600">
+                            {currentEstablishmentDeliverers.length + 1}
+                          </span>
+                          <p className="text-xs text-purple-700 mt-1">
+                            Ativos no sistema
+                          </p>
+                        </div>
+
+                        <div className="p-4 bg-orange-50 rounded-lg">
+                          <div className="flex items-center gap-2 mb-2">
+                            <Truck className="h-4 w-4 text-orange-600" />
+                            <span className="font-medium text-orange-900">
+                              Entregas
+                            </span>
+                          </div>
+                          <span className="text-2xl font-bold text-orange-600">
+                            {currentEstablishmentDeliveries.length}
+                          </span>
+                          <p className="text-xs text-orange-700 mt-1">
+                            Total registradas
+                          </p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
               </TabsContent>
             </Tabs>
           </CardContent>

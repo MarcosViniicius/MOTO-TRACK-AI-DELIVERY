@@ -200,12 +200,15 @@
   .modal-container {
     max-width: calc(100vw - 2rem);
     max-height: calc(100vh - 2rem);
+    overflow-y: auto;
   }
 
   /* Cards com melhor responsividade */
   .card-responsive {
     min-height: 0;
     overflow: hidden;
+    border-radius: 8px;
+    transition: all 0.2s ease-in-out;
   }
 
   /* Texto que quebra corretamente */
@@ -218,5 +221,38 @@
   /* Focus states melhorados */
   .focus-ring {
     @apply focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2;
+  }
+
+  /* Melhorias para formulários */
+  .form-container {
+    @apply space-y-4;
+  }
+
+  /* Grid responsivo para cards */
+  .grid-auto-fit {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 1rem;
+  }
+
+  /* Sombra suave para cards */
+  .card-shadow {
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1),
+      0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  }
+
+  /* Hover effect para cards */
+  .card-hover {
+    @apply hover:shadow-lg hover:-translate-y-1 transition-all duration-200;
+  }
+
+  /* Input com melhor aparência */
+  .input-enhanced {
+    @apply border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200;
+  }
+
+  /* Button com efeito loading */
+  .btn-loading {
+    @apply opacity-70 cursor-not-allowed;
   }
 }
